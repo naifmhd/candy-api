@@ -2,8 +2,8 @@
 
 namespace GetCandy\Api\Http\Transformers\Fractal\Shipping;
 
-use PriceCalculator;
 use GetCandy\Api\Core\Shipping\Models\ShippingPrice;
+use GetCandy\Api\Core\Pricing\PriceCalculatorInterface;
 use GetCandy\Api\Http\Transformers\Fractal\BaseTransformer;
 use GetCandy\Api\Http\Transformers\Fractal\Currencies\CurrencyTransformer;
 use GetCandy\Api\Http\Transformers\Fractal\Customers\CustomerGroupTransformer;
@@ -21,14 +21,16 @@ class ShippingPriceTransformer extends BaseTransformer
 
     public function transform(ShippingPrice $price)
     {
-        $prices = PriceCalculator::get($price->rate, 'default');
+        $prices = app()->getInstance()->make(PriceCalculatorInterface::class)->get($price->rate, 'default');
+        $minBasketPrices = app()->getInstance()->make(PriceCalculatorInterface::class)->get($price->min_basket, 'default');
 
         return [
             'id' => $price->encodedId(),
             'rate' => $prices->total_cost,
             'tax' => $prices->total_tax,
             'fixed' => (bool) $price->fixed,
-            'min_basket' => $price->min_basket,
+            'min_basket' => $minBasketPrices->total_cost,
+            'min_basket_tax' => $minBasketPrices->total_tax,
             'min_weight' => $price->min_weight,
             'weight_unit' => $price->weight_unit,
             'min_height' => $price->min_height,

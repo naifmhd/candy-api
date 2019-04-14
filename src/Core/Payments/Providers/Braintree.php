@@ -2,25 +2,30 @@
 
 namespace GetCandy\Api\Core\Payments\Providers;
 
-use Braintree_ClientToken;
+use Braintree_Gateway;
 use Braintree_Transaction;
-use Braintree_Configuration;
-use Braintree_Test_Transaction;
 use Braintree_Exception_NotFound;
-use Braintree_PaymentMethodNonce;
-use GetCandy\Api\Core\Orders\Models\Order;
+use GetCandy\Api\Core\Payments\PaymentResponse;
 use GetCandy\Api\Core\Payments\Models\Transaction;
 
 class Braintree extends AbstractProvider
 {
     protected $name = 'Braintree';
 
+    /**
+     * The Braintree api gateway.
+     * @var Braintree_Gateway
+     */
+    protected $gateway;
+
     public function __construct()
     {
-        Braintree_Configuration::environment(config('getcandy.payments.environment'));
-        Braintree_Configuration::merchantId(config('services.braintree.merchant_id'));
-        Braintree_Configuration::publicKey(config('services.braintree.key'));
-        Braintree_Configuration::privateKey(config('services.braintree.secret'));
+        $this->gateway = new Braintree_Gateway([
+            'environment' => config('getcandy.payments.environment'),
+            'merchantId' => config('services.braintree.merchant_id'),
+            'publicKey' => config('services.braintree.key'),
+            'privateKey' => config('services.braintree.secret'),
+        ]);
     }
 
     public function getName()
@@ -37,7 +42,7 @@ class Braintree extends AbstractProvider
 
     public function getClientToken()
     {
-        return Braintree_ClientToken::generate();
+        return $this->gateway->clientToken()->generate();
     }
 
     public function threeDSecured()
@@ -45,21 +50,10 @@ class Braintree extends AbstractProvider
         return config('services.braintree.3D_secure');
     }
 
-    //TODO: REMOVE BEFORE LIVE
-    private function settle($sale)
-    {
-        if (! app()->isLocal()) {
-            return $sale;
-        }
-
-        return Braintree_Test_Transaction::settle($sale->transaction->id);
-    }
-
-    public function validateToken($token)
+    public function validate($token)
     {
         try {
-            $token = Braintree_PaymentMethodNonce::find($token);
-
+            $token = $this->gateway->paymentMethodNonce()->find($token);
             if ($token->description == 'PayPal') {
                 $this->setName($token->description);
             }
@@ -88,16 +82,16 @@ class Braintree extends AbstractProvider
         );
     }
 
-    public function charge($token, Order $order)
+    public function charge()
     {
-        $merchant = $this->getMerchant($order->currency);
+        $merchant = $this->getMerchant($this->order->currency);
 
-        $billing = $order->billingDetails;
-        $shipping = $order->shippingDetails;
+        $billing = $this->order->billingDetails;
+        $shipping = $this->order->shippingDetails;
 
-        $sale = Braintree_Transaction::sale([
-            'amount' => $order->total,
-            'paymentMethodNonce' => $token,
+        $sale = $this->gateway->transaction()->sale([
+            'amount' => $this->order->order_total / 100,
+            'paymentMethodNonce' => $this->token,
             'merchantAccountId' => $merchant,
             'customer' => [
                 'firstName' => $billing['firstname'],
@@ -124,31 +118,66 @@ class Braintree extends AbstractProvider
             ],
         ]);
 
-        $transaction = $this->createTransaction($sale, $order);
+        if ($sale->success) {
+            $response = new PaymentResponse(true, 'Payment Pending');
 
-        return $transaction->success;
-    }
-
-    protected function createTransaction($result, $order)
-    {
-        $transaction = new Transaction;
-
-        $transaction->success = $result->success;
-        $transaction->order()->associate($order);
-        $transaction->merchant = $result->transaction->merchantAccountId;
-
-        $transaction->provider = $result->transaction->paymentInstrumentType;
-        $transaction->status = $result->transaction->status;
-        $transaction->amount = $result->transaction->amount;
-        $transaction->card_type = $result->transaction->creditCardDetails->cardType ?? '';
-        $transaction->last_four = $result->transaction->creditCardDetails->last4 ?? '';
-
-        if ($result->transaction) {
-            $transaction->transaction_id = $result->transaction->id;
-        } else {
-            $transaction->transaction_id = 'Unknown';
+            return $response->transaction(
+                $this->createSuccessTransaction($sale)
+            );
         }
 
+        $response = new PaymentResponse(false, 'Payment Failed');
+
+        return $response->transaction(
+            $this->createFailedTransaction($sale)
+        );
+    }
+
+    /**
+     * Create a failed transaction.
+     *
+     * @param array $errors
+     * @return Transaction
+     */
+    protected function createFailedTransaction($result)
+    {
+        $transaction = new Transaction;
+        $transaction->success = false;
+        $transaction->order()->associate($this->order);
+        $transaction->merchant = $result->transaction->merchantAccountId;
+        $transaction->provider = 'Braintree';
+        $transaction->driver = 'braintree';
+        $transaction->amount = $result->transaction->amount * 100;
+        $transaction->notes = $result->message;
+        $transaction->status = $result->transaction->status;
+        $transaction->transaction_id = $result->transaction->id;
+        $transaction->card_type = $result->transaction->creditCardDetails->cardType ?? 'Unknown';
+        $transaction->last_four = $result->transaction->creditCardDetails->last4 ?? '';
+        $transaction->address_matched = $result->transaction->avsStreetAddressResponseCode == 'M' ?: false;
+        $transaction->cvc_matched = $result->transaction->cvvResponseCode == 'M' ?: false;
+        $transaction->postcode_matched = $result->transaction->avsPostalCodeResponseCode == 'M' ?: false;
+        $transaction->save();
+
+        return $transaction;
+    }
+
+    protected function createSuccessTransaction($result)
+    {
+        $transaction = new Transaction;
+        $transaction->success = true;
+        $transaction->order()->associate($this->order);
+        $transaction->merchant = $result->transaction->merchantAccountId;
+        $transaction->provider = 'Braintree';
+        $transaction->driver = 'braintree';
+        $transaction->status = $result->transaction->status;
+        $transaction->amount = $result->transaction->amount * 100;
+        $transaction->card_type = $result->transaction->creditCardDetails->cardType ?? 'Unknown';
+        $transaction->last_four = $result->transaction->creditCardDetails->last4 ?? '';
+        $transaction->transaction_id = $result->transaction->id;
+        $transaction->address_matched = $result->transaction->avsStreetAddressResponseCode == 'M' ?: false;
+        $transaction->cvc_matched = $result->transaction->cvvResponseCode == 'M' ?: false;
+        $transaction->postcode_matched = $result->transaction->avsPostalCodeResponseCode == 'M' ?: false;
+        $transaction->setAttribute('threed_secure', $result->transaction->threeDSecureInfo == 'Authenticated' ?: false);
         $transaction->save();
 
         return $transaction;
@@ -177,7 +206,7 @@ class Braintree extends AbstractProvider
         }
     }
 
-    public function refund($token, $amount = null)
+    public function refund($token, $amount, $description)
     {
         $transaction = Braintree_Transaction::refund($token, $amount);
 

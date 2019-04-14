@@ -2,12 +2,12 @@
 
 namespace GetCandy\Api\Core\Products\Factories;
 
-use PriceCalculator;
 use Illuminate\Database\Eloquent\Model;
+use GetCandy\Api\Core\Scaffold\AbstractFactory;
 use GetCandy\Api\Core\Products\Models\ProductVariant;
 use GetCandy\Api\Core\Products\Interfaces\ProductVariantInterface;
 
-class ProductVariantFactory implements ProductVariantInterface
+class ProductVariantFactory extends AbstractFactory implements ProductVariantInterface
 {
     /**
      * The variant.
@@ -30,12 +30,14 @@ class ProductVariantFactory implements ProductVariantInterface
 
         $tieredPrice = $this->getTieredPrice($qty, $user);
         $variantPrice = $this->getVariantPrice($qty, $user);
+
         $basePrice = $variantPrice->base_cost;
         $unitCost = $variantPrice->unit_cost;
         $unitTax = $variantPrice->unit_tax;
         $totalCost = $variantPrice->total_cost;
         $totalTax = $variantPrice->total_tax;
         $basePrice = $variantPrice->base_cost;
+        $factorTax = $variantPrice->factor_tax;
 
         if ($tieredPrice) {
             $basePrice = $tieredPrice->base_cost;
@@ -44,10 +46,12 @@ class ProductVariantFactory implements ProductVariantInterface
             $totalCost = $tieredPrice->total_cost;
             $totalTax = $tieredPrice->total_tax;
             $basePrice = $tieredPrice->base_cost;
+            $factorTax = $tieredPrice->factor_tax;
         }
 
         $this->variant->qty = $qty;
         $this->variant->price = $basePrice;
+        $this->variant->factor_tax = $factorTax;
         $this->variant->unit_tax = $unitTax;
         $this->variant->unit_cost = $unitCost;
         $this->variant->total_tax = $totalTax;
@@ -90,7 +94,7 @@ class ProductVariantFactory implements ProductVariantInterface
             $taxRate = $this->variant->tax->percentage;
         }
 
-        return PriceCalculator::get(
+        return $this->calculator->get(
             $price->price,
             $taxRate,
             $qty,
@@ -114,14 +118,7 @@ class ProductVariantFactory implements ProductVariantInterface
             $ids[] = $group->id;
         }
 
-        $pricing = null;
-
-        // If the user is an admin, fall through
-        if (! $user || ($user && ! $user->hasRole('admin'))) {
-            $pricing = $this->variant->customerPricing
-                ->whereIn('customer_group_id', $ids)
-                ->sortBy('price')->first();
-        }
+        $pricing = $this->variant->customerPricing->sortBy('price')->first();
 
         $taxRate = $this->variant->tax->percentage ?? 0;
         $price = $this->variant->price;
@@ -131,7 +128,7 @@ class ProductVariantFactory implements ProductVariantInterface
             $price = $pricing->price;
         }
 
-        return PriceCalculator::get(
+        return $this->calculator->get(
             $price,
             $taxRate,
             $qty,

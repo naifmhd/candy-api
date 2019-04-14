@@ -3,50 +3,22 @@
 namespace GetCandy\Api\Core\Orders\Models;
 
 use Carbon\Carbon;
-use GetCandy\Api\Core\Auth\Models\User;
+use GetCandy\Api\Core\Traits\HasMeta;
 use GetCandy\Api\Core\Scaffold\BaseModel;
 use Illuminate\Database\Eloquent\Builder;
+use Spatie\Activitylog\Traits\LogsActivity;
 use GetCandy\Api\Core\Baskets\Models\Basket;
 use GetCandy\Api\Core\Payments\Models\Transaction;
 
 class Order extends BaseModel
 {
+    use LogsActivity, HasMeta;
+
+    protected static $recordEvents = ['created'];
+
     protected $hashids = 'order';
 
-    protected $fillable = [
-        'lines',
-        'delivery_total',
-        'tax_total',
-        'discount_total',
-        'sub_total',
-        'order_total',
-        'status',
-        'type',
-        'shipping_preference',
-        'shipping_method',
-        'billing_phone',
-        'billing_firstname',
-        'billing_lastname',
-        'billing_address',
-        'billing_address_two',
-        'billing_address_three',
-        'billing_city',
-        'billing_county',
-        'billing_state',
-        'billing_country',
-        'billing_zip',
-        'billing_phone',
-        'shipping_firstname',
-        'shipping_lastname',
-        'shipping_address',
-        'shipping_address_two',
-        'shipping_address_three',
-        'shipping_city',
-        'shipping_county',
-        'shipping_state',
-        'shipping_country',
-        'shipping_zip',
-    ];
+    protected $guarded = [];
 
     protected $dates = [
         'placed_at',
@@ -104,7 +76,7 @@ class Order extends BaseModel
         }
 
         return $qb->whereHas('lines', function ($q) use ($zone) {
-            return $q->where('variant', '=', $zone);
+            return $q->where('option', '=', $zone);
         });
     }
 
@@ -323,7 +295,9 @@ class Order extends BaseModel
      */
     public function user()
     {
-        return $this->belongsTo(User::class);
+        $class = config('auth.providers.users.model', User::class);
+
+        return $this->belongsTo($class);
     }
 
     public function transactions()

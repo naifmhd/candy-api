@@ -111,12 +111,12 @@ class SearchBuilder
         'customer-group-filter',
     ];
 
-    public function __construct(AttributeService $attributes, Client $client)
+    public function __construct(AttributeService $attributes)
     {
         $this->filters = collect($this->filters);
         $this->aggregations = collect($this->aggregations);
         $this->sorts = collect($this->sorts);
-        $this->client = $client;
+        $this->client = new Client(config('getcandy.search.client_config.elastic', []));
         $this->attributes = $attributes->all();
     }
 

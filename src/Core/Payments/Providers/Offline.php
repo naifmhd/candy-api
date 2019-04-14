@@ -2,7 +2,7 @@
 
 namespace GetCandy\Api\Core\Payments\Providers;
 
-use GetCandy\Api\Core\Payments\Models\Transaction;
+use GetCandy\Api\Core\Payments\PaymentResponse;
 
 class Offline extends AbstractProvider
 {
@@ -37,10 +37,7 @@ class Offline extends AbstractProvider
 
     public function charge()
     {
-        $transaction = new Transaction();
-        $transaction->success = true;
-
-        return $transaction;
+        return new PaymentResponse(true);
     }
 
     public function refund($token, $amount, $description)

@@ -10,6 +10,7 @@ use League\Fractal\Resource\Collection;
 use Elastica\Exception\InvalidException;
 use GetCandy\Api\Core\Categories\Models\Category;
 use GetCandy\Api\Core\Search\Interfaces\SearchResultInterface;
+use GetCandy\Api\Core\Currencies\Interfaces\CurrencyConverterInterface;
 use GetCandy\Api\Http\Transformers\Fractal\Products\ProductTransformer;
 use GetCandy\Api\Http\Transformers\Fractal\Categories\CategoryTransformer;
 
@@ -347,14 +348,17 @@ class SearchResultFactory implements SearchResultInterface
 
         $aggs = $this->results->getAggregations();
 
+        // Get our filterable attributes;
+        $attributes = app('api')->attributes()->getFilterable();
+
         $results = [];
 
         $selected = [];
         $all = [];
 
         foreach ($aggs as $handle => $agg) {
-            if ($handle == 'categories_after') {
-                foreach ($agg['categories_after_filter']['categories_post_inner']['buckets'] as $bucket) {
+            if ($handle == 'categories_post') {
+                foreach ($agg['categories_post_filter']['categories_post_inner']['buckets'] as $bucket) {
                     $selected[] = $bucket['key'];
                 }
             } elseif ($handle == 'categories_before') {
@@ -375,8 +379,8 @@ class SearchResultFactory implements SearchResultInterface
                     }
 
                     $label = trans('getcandy::search.price.aggregation.'.$label, [
-                        'min' => CurrencyConverter::format($bucket['from']),
-                        'max' => CurrencyConverter::format($bucket['to'] ?? 0),
+                        'min' => app()->getInstance()->make(CurrencyConverterInterface::class)->format($bucket['from']),
+                        'max' => app()->getInstance()->make(CurrencyConverterInterface::class)->format($bucket['to'] ?? 0),
                     ]);
 
                     $bucket['key'] = $label;
@@ -387,6 +391,9 @@ class SearchResultFactory implements SearchResultInterface
                 $results[$handle] = ['buckets' => $buckets];
             } else {
                 $results[$handle] = $agg;
+                $results[$handle]['attribute'] = $attributes->first(function ($a) use ($handle) {
+                    return $a->handle === $handle;
+                });
             }
         }
 

@@ -17,9 +17,12 @@ class SagePay extends AbstractProvider
 
     protected $tokenExpires;
 
-    public function __construct()
+    protected $http;
+
+    public function __construct(Client $client)
     {
         $this->host = config('services.sagepay.host', 'https://pi-test.sagepay.com/api/v1/');
+        $this->http = $client;
     }
 
     public function getName()
@@ -36,10 +39,6 @@ class SagePay extends AbstractProvider
 
     public function refund($token, $amount, $description)
     {
-        $client = new Client([
-            'base_uri' => $this->host,
-        ]);
-
         try {
             $payload = [
                 'transactionType' => 'Refund',
@@ -50,7 +49,7 @@ class SagePay extends AbstractProvider
                 'description' => $description,
             ];
 
-            $response = $client->request('POST', 'transactions', [
+            $response = $this->http->post($this->host.'transactions', [
                 'headers' => [
                     'Authorization' => 'Basic '.$this->getCredentials(),
                     'Content-Type' => 'application/json',
@@ -72,10 +71,6 @@ class SagePay extends AbstractProvider
 
     public function charge()
     {
-        $client = new Client([
-            'base_uri' => $this->host,
-        ]);
-
         $country = $this->order->billing_country;
 
         // Sage pay requires the country iso code, so we should find that to use.
@@ -119,9 +114,8 @@ class SagePay extends AbstractProvider
                 $payload['paymentMethod']['card']['reusable'] = true;
             }
 
-            \Log::info(json_encode($payload));
-
-            $response = $client->request('POST', 'transactions', [
+            // \Log::info(json_encode($payload));
+            $response = $this->http->post($this->host.'transactions', [
                 'headers' => [
                     'Authorization' => 'Basic '.$this->getCredentials(),
                     'Content-Type' => 'application/json',
@@ -148,6 +142,12 @@ class SagePay extends AbstractProvider
                 ->setTransactionId($content['transactionId'])
                 ->setPaRequest($content['paReq'])
                 ->setRedirect($content['acsUrl']);
+        } elseif ($content['status'] == 'Rejected') {
+            $response = new PaymentResponse(false, $content['statusDetail'] ?? 'Rejected', $content);
+
+            return $response->transaction(
+                $this->createFailedTransaction($content)
+            );
         }
 
         $response = new PaymentResponse(true, 'Payment Received');
@@ -187,14 +187,8 @@ class SagePay extends AbstractProvider
 
     public function processThreeD($transaction, $paRes)
     {
-        // https://pi-test.sagepay.com/api/v1/transactions/<transactionId>/3d-secure
-
-        $client = new Client([
-            'base_uri' => $this->host,
-        ]);
-
         try {
-            $response = $client->request('POST', 'transactions/'.$transaction.'/3d-secure', [
+            $response = $this->http->post($this->host.'transactions/'.$transaction.'/3d-secure', [
                 'headers' => [
                     'Authorization' => 'Basic '.$this->getCredentials(),
                     'Content-Type' => 'application/json',
@@ -238,12 +232,8 @@ class SagePay extends AbstractProvider
 
     protected function getTransactionFromApi($id)
     {
-        $client = new Client([
-            'base_uri' => $this->host,
-        ]);
-
         try {
-            $response = $client->request('GET', 'transactions/'.$id, [
+            $response = $this->http->get($this->host.'transactions/'.$id, [
                 'headers' => [
                     'Authorization' => 'Basic '.$this->getCredentials(),
                     'Content-Type' => 'application/json',
@@ -293,7 +283,6 @@ class SagePay extends AbstractProvider
     protected function createSuccessTransaction($content)
     {
         $transaction = new Transaction;
-
         $transaction->success = true;
         $transaction->order()->associate($this->order);
         $transaction->merchant = $this->getVendor();
@@ -345,12 +334,8 @@ class SagePay extends AbstractProvider
      */
     public function getClientToken()
     {
-        $client = new Client([
-            'base_uri' => $this->host,
-        ]);
-
         try {
-            $response = $client->request('POST', 'merchant-session-keys', [
+            $response = $this->http->post($this->host.'merchant-session-keys', [
                 'headers' => [
                     'Authorization' => 'Basic '.$this->getCredentials(),
                     'Content-Type' => 'application/json',

@@ -4,6 +4,7 @@ namespace GetCandy\Api\Core\Traits;
 
 use GetCandy\Api\Core\Attributes\Models\Attribute;
 use GetCandy\Api\Core\Attributes\Models\AttributeGroup;
+use GetCandy\Api\Core\Channels\Interfaces\ChannelFactoryInterface;
 
 trait HasAttributes
 {
@@ -13,6 +14,11 @@ trait HasAttributes
     public function attributes()
     {
         return $this->morphToMany(Attribute::class, 'attributable')->orderBy('position', 'asc');
+    }
+
+    public function hasAttribute($attribute)
+    {
+        return isset($this->attribute_data[$attribute]);
     }
 
     public function attributeGroup()
@@ -26,10 +32,15 @@ trait HasAttributes
         $userLocale = app()->getLocale();
 
         if (! $locale) {
-            $locale = app('api')->languages()->getDefaultRecord()->lang;
+            $locale = app()->getLocale();
         }
 
         if (! $channel) {
+            $factory = app()->getInstance()->make(ChannelFactoryInterface::class);
+            $channel = $factory->getChannel()->handle;
+        }
+
+        if (empty($this->attribute_data[$handle][$channel])) {
             $channel = $defaultChannel->handle;
         }
 
@@ -42,7 +53,7 @@ trait HasAttributes
         } elseif (empty($this->attribute_data[$handle][$channel][$userLocale])) {
             return;
         } elseif (is_null($this->attribute_data[$handle][$channel][$userLocale])) {
-            $channel = $defaultChannel->handle;
+            $channel = 'webstore';
             $locale = $locale->lang;
         }
     }

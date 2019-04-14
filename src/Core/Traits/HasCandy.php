@@ -26,6 +26,11 @@ trait HasCandy
         return $this->belongsToMany(CustomerGroup::class);
     }
 
+    public function inGroup($group)
+    {
+        return $this->groups()->where('handle', '=', $group)->exists();
+    }
+
     public function language()
     {
         return $this->belongsTo(Language::class);
@@ -71,6 +76,14 @@ trait HasCandy
     public function orders()
     {
         return $this->hasMany(Order::class)->orderBy('reference', 'desc')->withoutGlobalScope('open')->withoutGlobalScope('not_expired');
+    }
+
+    public function firstOrder()
+    {
+        return $this->hasOne(Order::class)
+            ->withoutGlobalScopes()
+            ->whereNotNull('placed_at')
+            ->orderBy('placed_at', 'asc');
     }
 
     public function details()

@@ -13,6 +13,7 @@ Route::group([
         'api.customer_groups',
         'api.locale',
         'api.tax',
+        'api.detect_hub',
     ],
     'prefix' => 'api/'.config('app.api_version', 'v1'),
     'namespace' => 'GetCandy\Api\Http\Controllers',
@@ -20,6 +21,16 @@ Route::group([
     $router->post('account/password', [
         'as' => 'account.password.reset',
         'uses' => 'Auth\AccountController@resetPassword',
+    ]);
+
+    $router->get('activity-log', [
+        'as' => 'activitylog.index',
+        'uses' => 'ActivityLog\ActivityLogController@index',
+    ]);
+
+    $router->post('activity-log', [
+        'as' => 'activitylog.store',
+        'uses' => 'ActivityLog\ActivityLogController@store',
     ]);
 
     $router->post('addresses', 'Addresses\AddressController@store');
@@ -33,6 +44,7 @@ Route::group([
      */
 
     $router->put('assets', 'Assets\AssetController@updateAll');
+    $router->post('assets/simple', 'Assets\AssetController@storeSimple');
     $router->resource('assets', 'Assets\AssetController', [
         'except' => ['edit', 'create'],
     ]);
@@ -65,6 +77,7 @@ Route::group([
     $router->get('baskets/current', 'Baskets\BasketController@current');
     $router->get('baskets/saved', 'Baskets\BasketController@saved');
     $router->post('baskets/{id}/save', 'Baskets\BasketController@save');
+    $router->post('baskets/{id}/claim', 'Baskets\BasketController@claim');
     $router->delete('baskets/{basket}', 'Baskets\BasketController@destroy');
     $router->put('baskets/saved/{basket}', 'Baskets\SavedBasketController@update');
 
@@ -142,18 +155,19 @@ Route::group([
      */
     $router->post('orders/bulk', 'Orders\OrderController@bulkUpdate');
     $router->get('orders/types', 'Orders\OrderController@getTypes');
+    $router->get('orders/export', 'Orders\OrderController@getExport');
     $router->post('orders/email-preview/{status}', 'Orders\OrderController@emailPreview');
     $router->resource('orders', 'Orders\OrderController', [
         'only' => ['index', 'update'],
     ]);
 
-    /*
-     * Pages
-     */
-    $router->get('/pages/{channel}/{lang}/{slug?}', 'Pages\PageController@show');
-    $router->resource('pages', 'Pages\PageController', [
-        'except' => ['edit', 'create'],
-    ]);
+    // /*
+    //  * Pages
+    //  */
+    // $router->get('/pages/{channel}/{lang}/{slug?}', 'Pages\PageController@show');
+    // $router->resource('pages', 'Pages\PageController', [
+    //     'except' => ['edit', 'create'],
+    // ]);
 
     /*
      * Product variants
@@ -167,16 +181,10 @@ Route::group([
     /*
      * Products
      */
-    $router->post('products/{product}/urls', 'Products\ProductController@createUrl');
-    $router->post('products/{product}/redirects', 'Products\ProductRedirectController@store');
-    $router->post('products/{product}/attributes', 'Products\ProductAttributeController@update');
-    $router->post('products/{product}/collections', 'Products\ProductCollectionController@update');
-    $router->post('products/{product}/routes', 'Products\ProductRouteController@store');
-    $router->post('products/{product}/categories', 'Products\ProductCategoryController@update');
-    $router->delete('products/{product}/categories/{category}', 'Products\ProductCategoryController@destroy');
-    $router->delete('products/{product}/collections/{collection}', 'Products\ProductCollectionController@destroy');
-    $router->post('products/{product}/associations', 'Products\ProductAssociationController@store');
-    $router->delete('products/{product}/associations', 'Products\ProductAssociationController@destroy');
+    $router->prefix('products')->namespace('Products')->group(__DIR__.'/../routes/catalogue-manager/products.php');
+    /*
+     * Resource routes
+     */
     $router->resource('products', 'Products\ProductController', [
         'except' => ['edit', 'create', 'show'],
     ]);

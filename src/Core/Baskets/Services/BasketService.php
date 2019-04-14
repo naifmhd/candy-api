@@ -8,9 +8,10 @@ use GetCandy\Api\Core\Discounts\Factory;
 use GetCandy\Api\Core\Orders\Models\Order;
 use GetCandy\Api\Core\Scaffold\BaseService;
 use GetCandy\Api\Core\Baskets\Models\Basket;
+use GetCandy\Api\Core\Discounts\Models\Discount;
 use GetCandy\Api\Core\Baskets\Models\SavedBasket;
 use GetCandy\Api\Core\Baskets\Events\BasketStoredEvent;
-use GetCandy\Api\Core\Baskets\Interfaces\BasketInterface;
+use GetCandy\Api\Core\Baskets\Interfaces\BasketFactoryInterface;
 use GetCandy\Api\Core\Products\Interfaces\ProductVariantInterface;
 
 class BasketService extends BaseService
@@ -35,7 +36,7 @@ class BasketService extends BaseService
     protected $variantFactory;
 
     public function __construct(
-        BasketInterface $factory,
+        BasketFactoryInterface $factory,
         ProductVariantInterface $variantFactory
     ) {
         $this->model = new Basket();
@@ -54,7 +55,6 @@ class BasketService extends BaseService
     public function getBasket($id = null, $user = null)
     {
         $basket = new Basket();
-
         if ($id) {
             $basketId = $this->getDecodedId($id);
             $basket = Basket::find($basketId);
@@ -86,11 +86,16 @@ class BasketService extends BaseService
         $basket = $this->model->with([
             'user',
             'order',
+            'discounts.rewards',
             'lines.basket',
             'lines.variant',
             'lines.variant.tax',
             'lines.variant.tiers',
+            'lines.variant.image.transforms',
             'lines.variant.product',
+            'lines.variant.product.assets',
+            'lines.variant.product.assets.transforms',
+            'lines.variant.product.routes',
             'lines.variant.customerPricing',
         ])->findOrFail($id);
 
@@ -172,6 +177,8 @@ class BasketService extends BaseService
             $user
         );
 
+        $basket->meta = $data['meta'] ?? null;
+
         if (empty($data['currency'])) {
             $basket->currency = app('api')->currencies()->getDefaultRecord()->code;
         } else {
@@ -183,7 +190,27 @@ class BasketService extends BaseService
         if (! empty($data['variants'])) {
             $this->remapLines($basket, $data['variants']);
         }
-        $basket->load('lines');
+        $basket->load([
+            'lines',
+            'lines.variant.product.routes',
+            'lines.variant.image.transforms',
+            'lines.variant.product.assets.transforms',
+        ]);
+
+        $discounts = Discount::all();
+
+        $eligible = [];
+
+        foreach ($discounts as $discount) {
+            foreach ($discount->items as $item) {
+                if ($item->check($basket->user, $basket)) {
+                    $eligible[] = $discount->id;
+                }
+            }
+        }
+
+        $basket->discounts()->sync($eligible);
+
         $basket = $this->factory->init($basket)->get();
 
         $basket->save();
@@ -242,6 +269,7 @@ class BasketService extends BaseService
                 'product_variant_id' => $variant->id,
                 'quantity' => $item['quantity'],
                 'total' => $item['quantity'] * $variant->price,
+                'meta' => $item['meta'] ?? [],
             ];
         });
 
@@ -277,7 +305,22 @@ class BasketService extends BaseService
      */
     public function deleteDiscount($basketId, $discountId)
     {
-        $basket = $this->getByHashedId($basketId);
+        $id = $this->model->decodeId($basketId);
+        $basket = $this->model->with([
+            'user',
+            'order',
+            'discounts.rewards',
+            'lines.basket',
+            'lines.variant',
+            'lines.variant.tax',
+            'lines.variant.tiers',
+            'lines.variant.product',
+            'lines.variant.product.assets',
+            'lines.variant.product.assets.transforms',
+            'lines.variant.product.routes',
+            'lines.variant.customerPricing',
+        ])->findOrFail($id);
+
         $discount = app('api')->discounts()->getByHashedId($discountId);
 
         $basket->discounts()->detach($discount);
@@ -294,7 +337,7 @@ class BasketService extends BaseService
      *
      * @return mixed
      */
-    public function getCurrentForUser($user)
+    public function getCurrentForUser($user, $includes = [])
     {
         if (! $user) {
             return;
@@ -304,9 +347,11 @@ class BasketService extends BaseService
             $user = $this->getByHashedId($user);
         }
 
-        $basket = $user->latestBasket;
+        if ($user->latestBasket) {
+            $basket = $user->latestBasket->load($includes ?? []);
+        }
 
-        if ($basket) {
+        if (! empty($basket)) {
             if ($basket->order && ! $basket->order->placed_at || ! $basket->order) {
                 return $this->factory->init($basket)->get();
             }
@@ -364,12 +409,24 @@ class BasketService extends BaseService
             'resolved_at' => Carbon::now(),
             'merged_id' => $userBasket->id,
         ]);
+
+        // Need to determine whether the basket was changed.
+        $oldProducts = $guestBasket->lines->mapWithKeys(function ($l) {
+            return [$l->variant->sku => $l->quantity];
+        })->toArray();
+
+        $currentProducts = $userBasket->lines->mapWithKeys(function ($l) {
+            return [$l->variant->sku => $l->quantity];
+        })->toArray();
+
         $userBasket->lines()->delete();
         $userBasket->lines()->createMany(
             $newLines->merge($oldLines)->toArray()
         );
 
-        return $this->factory->init($userBasket)->get();
+        return $this->factory->init($userBasket)->changed(
+            ! empty($oldProducts) ? ! ($currentProducts === $oldProducts) : false
+        )->get();
     }
 
     /**

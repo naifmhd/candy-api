@@ -62,7 +62,7 @@ class ProductService extends BaseService
             abort(404);
         }
 
-        $product->attribute_data = $data['attributes'];
+        $product->attribute_data = $data['attribute_data'];
 
         if (! empty($data['family_id'])) {
             $family = app('api')->productFamilies()->getByHashedId($data['family_id']);
@@ -72,16 +72,6 @@ class ProductService extends BaseService
         }
 
         event(new AttributableSavedEvent($product));
-
-        if (! empty($data['channels']['data'])) {
-            $product->channels()->sync(
-                $this->getChannelMapping($data['channels']['data'])
-            );
-        }
-        if (! empty($data['customer_groups'])) {
-            $groupData = $this->mapCustomerGroupData($data['customer_groups']['data']);
-            $product->customerGroups()->sync($groupData);
-        }
 
         event(new IndexableSavedEvent($product));
 
@@ -156,6 +146,13 @@ class ProductService extends BaseService
             $product->channels()->sync(
                 $this->getChannelMapping($data['channels']['data'])
             );
+        } else {
+            $defaultChannel = app('api')->channels()->getDefaultRecord();
+            $product->channels()->sync([
+                $defaultChannel->id => [
+                    'published_at' => null,
+                ],
+            ]);
         }
 
         $urls = $this->getUniqueUrl($data['url']);
@@ -299,9 +296,12 @@ class ProductService extends BaseService
 
         $query = $this->model->with([
             'routes',
+            'firstVariant',
+            'assets.transforms',
             'variants.product',
             'variants.tiers',
             'variants.tiers.group',
+            'variants.customerPricing',
             'primaryAsset',
             'primaryAsset.transforms.transform',
             'primaryAsset.transforms.asset',
@@ -309,27 +309,6 @@ class ProductService extends BaseService
             'primaryAsset.tags',
             'primaryAsset.source',
         ])->whereIn('id', $parsedIds);
-
-        $groups = \GetCandy::getGroups();
-
-        $ids = [];
-
-        foreach ($groups as $group) {
-            $ids[] = $group->id;
-        }
-
-        // If the user is an admin, fall through
-        if (! $user || ($user && ! $user->hasRole('admin'))) {
-            $query->with([
-                'variants' => function ($q1) use ($ids) {
-                    $q1->with(['customerPricing' => function ($q2) use ($ids) {
-                        $q2->whereIn('customer_group_id', $ids)
-                            ->orderBy('price', 'asc')
-                            ->first();
-                    }]);
-                },
-            ]);
-        }
 
         if (count($parsedIds)) {
             $query = $query->orderByRaw("field(id,{$placeholders})", $parsedIds);
@@ -349,8 +328,11 @@ class ProductService extends BaseService
     {
         return ProductRecommendation::whereIn('product_id', $products)
             ->with(
+                'product.routes',
+                'product.categories.assets.transforms',
                 'product.variants.tiers',
-                'product.assets.transforms'
+                'product.assets.transforms',
+                'product.firstVariant'
             )
             ->whereHas('product')
             ->select(

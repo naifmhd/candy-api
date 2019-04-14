@@ -5,6 +5,8 @@ namespace GetCandy\Api\Core\Search\Providers\Elastic\Types;
 use Carbon\Carbon;
 use GetCandy\Api\Core\Search\Indexable;
 use Illuminate\Database\Eloquent\Model;
+use GetCandy\Api\Core\Scopes\ChannelScope;
+use GetCandy\Api\Core\Scopes\CustomerGroupScope;
 
 abstract class BaseType
 {
@@ -131,7 +133,10 @@ abstract class BaseType
         foreach ($model->attribute_data as $field => $channel) {
             foreach ($channel as $channelName => $locales) {
                 foreach ($locales as $locale => $value) {
-                    $newValue = strip_tags($model->attribute($field, $channelName, $locale));
+                    $newValue = $model->attribute($field, $channelName, $locale);
+                    if (! is_array($newValue)) {
+                        $newValue = strip_tags($newValue);
+                    }
                     if (! $this->mappingValueExists($mapping, $model->id, $locale, $field, $newValue)) {
                         $mapping[$model->id][$locale]['data'][$field][] = $newValue;
                     }
@@ -191,7 +196,10 @@ abstract class BaseType
      */
     protected function getCategories(Model $model, $lang = 'en')
     {
-        $categories = $model->categories;
+        $categories = $model->categories()->withoutGlobalScopes([
+            CustomerGroupScope::class,
+            ChannelScope::class,
+        ])->get();
 
         $cats = collect();
 
@@ -214,7 +222,10 @@ abstract class BaseType
 
     protected function getCustomerGroups(Model $model, $lang = 'en')
     {
-        return $model->customerGroups->filter(function ($group) {
+        return $model->customerGroups()->withoutGlobalScopes([
+            CustomerGroupScope::class,
+            ChannelScope::class,
+        ])->get()->filter(function ($group) {
             return $group->pivot->purchasable && $group->pivot->visible;
         })->map(function ($item) {
             return [
@@ -265,7 +276,9 @@ abstract class BaseType
                 ];
 
                 if ($attribute->filterable) {
-                    $payload[$attribute->handle]['fields']['filter'] = ['type' => 'keyword'];
+                    $payload[$attribute->handle]['fields']['filter'] = [
+                        'type' => $attribute->type == 'number' ? 'integer' : 'keyword',
+                    ];
                 }
             }
 

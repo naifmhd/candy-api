@@ -2,15 +2,14 @@
 
 namespace GetCandy\Api\Core\Baskets\Factories;
 
-use GetCandy\Api\Core\Discounts\Factory;
 use GetCandy\Api\Core\Orders\Models\Order;
 use GetCandy\Api\Core\Baskets\Models\Basket;
-use GetCandy\Api\Core\Discounts\DiscountInterface;
 use GetCandy\Api\Core\Baskets\Events\BasketFetchedEvent;
-use GetCandy\Api\Core\Baskets\Interfaces\BasketInterface;
 use GetCandy\Api\Core\Baskets\Interfaces\BasketLineInterface;
+use GetCandy\Api\Core\Taxes\Interfaces\TaxCalculatorInterface;
+use GetCandy\Api\Core\Baskets\Interfaces\BasketFactoryInterface;
 
-class BasketFactory implements BasketInterface
+class BasketFactory implements BasketFactoryInterface
 {
     /**
      * The current basket.
@@ -27,41 +26,27 @@ class BasketFactory implements BasketInterface
     protected $order;
 
     /**
-     * The applied discounts.
-     *
-     * @var array
-     */
-    protected $discounts = [];
-
-    /**
-     * The discount factory.
-     *
-     * @var DiscountInterface
-     */
-    protected $discountFactory;
-
-    /**
      * The basket lines.
      *
-     * @var mixed
+     * @var BasketLineInterface
      */
-    protected $lines = [];
+    public $lines;
+
+    protected $tax;
 
     /**
-     * The basket line factory.
+     * Whether the basket has been changed.
      *
-     * @var string
+     * @var bool
      */
-    protected $lineFactory;
+    protected $changed = false;
 
     public function __construct(
-        DiscountInterface $discountFactory,
-        BasketLineInterface $lineFactory
+        BasketLineInterface $lineFactory,
+        TaxCalculatorInterface $tax
     ) {
-        $this->lineFactory = $lineFactory;
-        $this->lines = collect($this->lines);
-        $this->discountFactory = $discountFactory;
-        $this->discounts = collect($this->discounts);
+        $this->lines = $lineFactory;
+        $this->tax = $tax;
     }
 
     /**
@@ -74,21 +59,24 @@ class BasketFactory implements BasketInterface
     {
         $this->basket = $basket;
         $this->order = $basket->order;
-        $this->discounts = $this->discountFactory
-                            ->init($basket->discounts)
-                            ->setBasket($this->basket)
-                            ->setUser($this->basket->user)
-                            ->getApplied();
 
-        $this->basket->discounts()->sync(
-            $this->discounts->pluck('id')->toArray()
-        );
-
-        foreach ($basket->lines as $line) {
-            $this->lines->push(
-                $this->lineFactory->init($line)->get()
-            );
+        foreach ($basket->discounts as $discount) {
+            $this->lines->discount($discount);
         }
+        $this->lines->add($basket->lines);
+
+        return $this;
+    }
+
+    /**
+     * Whether the basket has been changed.
+     *
+     * @param bool $bool
+     * @return self
+     */
+    public function changed($bool)
+    {
+        $this->changed = $bool;
 
         return $this;
     }
@@ -103,13 +91,26 @@ class BasketFactory implements BasketInterface
         $this->basket->sub_total = 0;
         $this->basket->total_tax = 0;
         $this->basket->total_cost = 0;
+        $this->basket->changed = $this->changed;
 
-        foreach ($this->lines as $line) {
-            $this->basket->sub_total += $line->total_cost;
-            $this->basket->total_tax += $line->total_tax;
+        // Without tax, without discounts.
+        $subTotal = 0;
+        // Discount total, without tax.
+        $discountTotal = 0;
+
+        // Total is subtotal minus discount total
+        // Tax is the amount from taking off the discount total from sub total.
+
+        foreach ($this->lines->get() as $line) {
+            $subTotal += $line->total_cost;
+            $discountTotal += $line->discount_total;
         }
 
-        $this->basket->total_cost = $this->basket->sub_total + $this->basket->total_tax;
+        $this->basket->sub_total = $subTotal;
+        $this->basket->discount_total = $discountTotal;
+
+        $this->basket->total_tax = $this->tax->amount($subTotal - $discountTotal);
+        $this->basket->total_cost = ($this->basket->sub_total - $discountTotal) + $this->basket->total_tax;
 
         event(new BasketFetchedEvent($this->basket));
 

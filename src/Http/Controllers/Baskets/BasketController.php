@@ -7,15 +7,36 @@ use GetCandy\Api\Http\Controllers\BaseController;
 use GetCandy\Api\Http\Requests\Baskets\SaveRequest;
 use GetCandy\Api\Http\Requests\Baskets\CreateRequest;
 use GetCandy\Api\Http\Requests\Baskets\DeleteRequest;
+use GetCandy\Api\Core\Baskets\Factories\BasketFactory;
 use GetCandy\Api\Http\Requests\Baskets\PutUserRequest;
+use GetCandy\Api\Http\Resources\Baskets\BasketResource;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use GetCandy\Api\Core\Discounts\Services\DiscountService;
 use GetCandy\Api\Http\Requests\Baskets\AddDiscountRequest;
+use GetCandy\Api\Http\Requests\Baskets\ClaimBasketRequest;
 use GetCandy\Api\Http\Requests\Baskets\DeleteDiscountRequest;
+use GetCandy\Api\Core\Baskets\Interfaces\BasketCriteriaInterface;
 use GetCandy\Api\Http\Transformers\Fractal\Baskets\BasketTransformer;
 use GetCandy\Api\Http\Transformers\Fractal\Baskets\SavedBasketTransformer;
 
 class BasketController extends BaseController
 {
+    /**
+     * @var BasketCriteria
+     */
+    protected $baskets;
+
+    /**
+     * @var BasketFactory
+     */
+    protected $factory;
+
+    public function __construct(BasketCriteriaInterface $baskets, BasketFactory $factory)
+    {
+        $this->baskets = $baskets;
+        $this->factory = $factory;
+    }
+
     /**
      * Returns a listing of channels.
      * @return Json
@@ -40,21 +61,42 @@ class BasketController extends BaseController
             return $this->errorNotFound();
         }
 
-        return $this->respondWithItem($basket, new BasketTransformer);
+        return new BasketResource($basket);
     }
 
-    public function addDiscount($basketId, AddDiscountRequest $request)
+    /**
+     * Handle the request to add a discount to a basket.
+     *
+     * @param string $basketId
+     * @param AddDiscountRequest $request
+     * @param DiscountService $discounts
+     * @return BasketResource
+     */
+    public function addDiscount($basketId, AddDiscountRequest $request, DiscountService $discounts)
     {
-        $basket = app('api')->baskets()->addDiscount($basketId, $request->coupon);
+        $discount = $discounts->getByCoupon($request->coupon);
+        $basket = $this->baskets->id($basketId)->first();
+        $factory = $this->factory->init($basket);
+        $factory->lines->discount($discount->set->discount);
 
-        return $this->respondWithItem($basket, new BasketTransformer);
+        $discount->uses ? $discount->increment('uses') : 1;
+
+        if (! $basket->discount($request->coupon)) {
+            $basket->discounts()->attach($discount->set->discount->id, ['coupon' => $request->coupon]);
+        }
+
+        $basket->load('discounts');
+
+        return new BasketResource(
+            $factory->get()
+        );
     }
 
     public function deleteDiscount($basketId, DeleteDiscountRequest $request)
     {
         $basket = app('api')->baskets()->deleteDiscount($basketId, $request->discount_id);
 
-        return $this->respondWithItem($basket, new BasketTransformer);
+        return new BasketResource($this->factory->init($basket->refresh())->get());
     }
 
     /**
@@ -72,7 +114,7 @@ class BasketController extends BaseController
             return $this->errorUnprocessable(trans('getcandy::validation.max_qty'));
         }
 
-        return $this->respondWithItem($basket, new BasketTransformer);
+        return new BasketResource($basket);
     }
 
     /**
@@ -85,7 +127,7 @@ class BasketController extends BaseController
     {
         $basket = app('api')->baskets()->save($id, $request->name);
 
-        return $this->respondWithItem($basket, new BasketTransformer);
+        return new BasketResource($basket);
     }
 
     /**
@@ -119,18 +161,38 @@ class BasketController extends BaseController
      * Associate a user to a basket request.
      *
      * @param PutUserRequest $request
-     *
+     * @deprecated 0.2.39
+     * @deprecated Use claim instead, this function will be removed in 0.3.0
      * @return void
      */
     public function putUser($basketId, PutUserRequest $request)
     {
+        // TODO Remove in 0.3.0
         try {
             $basket = app('api')->baskets()->addUser($basketId, $request->user_id);
         } catch (ModelNotFoundException $e) {
             return $this->errorNotFound();
         }
 
-        return $this->respondWithItem($basket, new BasketTransformer);
+        return new BasketResource($basket);
+    }
+
+    /**
+     * Associate a user to a basket request.
+     *
+     * @param ClaimBasketRequest $request
+     *
+     * @return void
+     */
+    public function claim($basketId, ClaimBasketRequest $request)
+    {
+        try {
+            $basket = app('api')->baskets()->addUser($basketId, $request->user()->encodedId());
+        } catch (ModelNotFoundException $e) {
+            return $this->errorNotFound();
+        }
+
+        return new BasketResource($basket);
     }
 
     public function deleteUser($basketId)
@@ -141,7 +203,7 @@ class BasketController extends BaseController
             return $this->errorNotFound();
         }
 
-        return $this->respondWithItem($basket, new BasketTransformer);
+        return new BasketResource($basket);
     }
 
     /**
@@ -152,12 +214,12 @@ class BasketController extends BaseController
      */
     public function current(Request $request)
     {
-        $basket = app('api')->baskets()->getCurrentForUser($request->user());
+        $basket = app('api')->baskets()->getCurrentForUser($request->user(), $request->includes);
         if (! $basket) {
             return $this->errorNotFound("Basket does't exist");
         }
 
-        return $this->respondWithItem($basket, new BasketTransformer);
+        return new BasketResource($basket);
     }
 
     /**
@@ -170,6 +232,6 @@ class BasketController extends BaseController
     {
         $basket = app('api')->baskets()->resolve($request->user(), $request->basket_id, $request->merge);
 
-        return $this->respondWithItem($basket, new BasketTransformer);
+        return new BasketResource($basket);
     }
 }

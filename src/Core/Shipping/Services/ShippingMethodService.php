@@ -74,6 +74,16 @@ class ShippingMethodService extends BaseService
         return $shipping;
     }
 
+    public function all()
+    {
+        return $this->model->with([
+          'zones',
+          'users',
+          'prices',
+          'channels',
+        ])->channel()->get();
+    }
+
     /**
      * Gets shipping methods for an order.
      *
@@ -87,25 +97,32 @@ class ShippingMethodService extends BaseService
         $order = app('api')->orders()->getByHashedId($orderId);
         $basket = $this->baskets->getForOrder($order);
 
-        $methods = $this->all();
+        $zones = app('api')->shippingZones()->getByCountryName($order->shipping_details['country']);
+
         $basket = $order->basket;
         $calculator = new ShippingCalculator(app());
 
         $options = [];
 
-        foreach ($methods as $index => $method) {
-            $option = $calculator->with($method)->calculate($order);
-            if (! $option) {
-                continue;
-            }
-            if (is_array($option)) {
-                $options = array_merge($options, $option);
-            } else {
-                $options[$index] = $option;
+        foreach ($zones as $zone) {
+            foreach ($zone->methods as $index => $method) {
+                if ($method->type == $order->type) {
+                    $options[$index] = $method->prices->first()->load('method');
+                }
+                $option = $calculator->with($method)->calculate($order);
+                if (! $option) {
+                    continue;
+                }
+                $option->load(['method']);
+                if (is_array($option)) {
+                    $options = array_merge($options, $option);
+                } else {
+                    $options[$option->method->id] = $option;
+                }
             }
         }
 
-        return collect($options);
+        return collect($options)->unique('shipping_method_id');
     }
 
     /**
