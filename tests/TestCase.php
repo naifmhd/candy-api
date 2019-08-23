@@ -4,9 +4,11 @@ namespace Tests;
 
 use TaxCalculator;
 use Tests\Stubs\User;
+use GetCandy\Api\Core\Channels\Models\Channel;
 use GetCandy\Api\Providers\ApiServiceProvider;
 use GetCandy\Api\Core\Baskets\Factories\BasketFactory;
 use Illuminate\Foundation\Bootstrap\LoadEnvironmentVariables;
+use GetCandy\Api\Core\Channels\Interfaces\ChannelFactoryInterface;
 
 abstract class TestCase extends \Orchestra\Testbench\TestCase
 {
@@ -24,6 +26,10 @@ abstract class TestCase extends \Orchestra\Testbench\TestCase
         // TaxCalculator::setTax(
         //     app('api')->taxes()->getDefaultRecord()
         // );
+
+        // Make sure our channel is set.
+        $channel = app()->getInstance()->make(ChannelFactoryInterface::class);
+        $channel->set(Channel::first());
     }
 
     /**

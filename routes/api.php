@@ -13,11 +13,18 @@ Route::group([
         'api.customer_groups',
         'api.locale',
         'api.tax',
+        'api.channels',
         'api.detect_hub',
     ],
     'prefix' => 'api/'.config('app.api_version', 'v1'),
     'namespace' => 'GetCandy\Api\Http\Controllers',
 ], function ($router) {
+
+    /*
+    * Imports
+    */
+    $router->post('import', 'Utils\ImportController@process');
+
     $router->post('account/password', [
         'as' => 'account.password.reset',
         'uses' => 'Auth\AccountController@resetPassword',
@@ -73,13 +80,15 @@ Route::group([
     /*
      * Baskets
      */
-    $router->post('baskets/resolve', 'Baskets\BasketController@resolve');
-    $router->get('baskets/current', 'Baskets\BasketController@current');
-    $router->get('baskets/saved', 'Baskets\BasketController@saved');
-    $router->post('baskets/{id}/save', 'Baskets\BasketController@save');
-    $router->post('baskets/{id}/claim', 'Baskets\BasketController@claim');
-    $router->delete('baskets/{basket}', 'Baskets\BasketController@destroy');
-    $router->put('baskets/saved/{basket}', 'Baskets\SavedBasketController@update');
+    Route::group(['middleware', ['api:channels']], function ($router) {
+        $router->post('baskets/resolve', 'Baskets\BasketController@resolve');
+        $router->get('baskets/current', 'Baskets\BasketController@current');
+        $router->get('baskets/saved', 'Baskets\BasketController@saved');
+        $router->post('baskets/{id}/save', 'Baskets\BasketController@save');
+        $router->post('baskets/{id}/claim', 'Baskets\BasketController@claim');
+        $router->delete('baskets/{basket}', 'Baskets\BasketController@destroy');
+        $router->put('baskets/saved/{basket}', 'Baskets\SavedBasketController@update');
+    });
 
     /*
      * Payments
@@ -120,7 +129,6 @@ Route::group([
     /*
      * Customers
      */
-
     $router->resource('customers/groups', 'Customers\CustomerGroupController', [
         'except' => ['edit', 'create', 'show'],
     ]);
@@ -177,11 +185,23 @@ Route::group([
     ]);
     $router->put('products/variants/{variant}/inventory', 'Products\ProductVariantController@updateInventory');
     $router->post('products/{product}/variants', 'Products\ProductVariantController@store');
+    $router->post('products/{product}/duplicate', 'Products\ProductController@duplicate');
 
     /*
      * Products
      */
     $router->prefix('products')->namespace('Products')->group(__DIR__.'/../routes/catalogue-manager/products.php');
+
+    /*
+     * Reporting
+     */
+
+    $router->prefix('reports')->namespace('Reports')->group(function ($router) {
+        $router->get('/sales', 'ReportController@sales');
+        $router->get('/orders', 'ReportController@orders');
+        $router->get('/metrics/{subject}', 'ReportController@metrics');
+    });
+
     /*
      * Resource routes
      */
@@ -248,6 +268,7 @@ Route::group([
     /*
      * Users
      */
+    $router->get('users/fields', 'Users\UserController@fields');
     $router->get('users/current', 'Users\UserController@getCurrentUser');
     $router->delete('users/payments/{id}', 'Users\UserController@deleteReusablePayment');
     $router->resource('users', 'Users\UserController', [

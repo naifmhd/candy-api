@@ -5,9 +5,12 @@ namespace GetCandy\Api\Core\Categories\Services;
 use GetCandy\Api\Core\Routes\Models\Route;
 use GetCandy\Api\Core\Scaffold\BaseService;
 use GetCandy\Api\Core\Search\SearchContract;
+use GetCandy\Api\Core\Channels\Models\Channel;
 use GetCandy\Api\Core\Categories\Models\Category;
+use GetCandy\Api\Core\Customers\Models\CustomerGroup;
 use GetCandy\Api\Core\Search\Events\IndexableSavedEvent;
 use GetCandy\Api\Core\Attributes\Events\AttributableSavedEvent;
+use GetCandy\Api\Core\Categories\Events\CategoryStoredEvent;
 
 class CategoryService extends BaseService
 {
@@ -64,12 +67,21 @@ class CategoryService extends BaseService
         if (! empty($data['customer_groups'])) {
             $groupData = $this->mapCustomerGroupData($data['customer_groups']['data']);
             $category->customerGroups()->sync($groupData);
+        } else {
+            $category->customerGroups()->sync(CustomerGroup::select('id')->get(), [
+                'visible' => false,
+                'purchasable' => false,
+            ]);
         }
 
         if (! empty($data['channels']['data'])) {
             $category->channels()->sync(
                 $this->getChannelMapping($data['channels']['data'])
             );
+        } else {
+            $category->channels()->sync(Channel::select('id')->get(), [
+                'published_at' => null,
+            ]);
         }
 
         $urls = $this->getUniqueUrl($data['url'], $data['path'] ?? null);
@@ -84,6 +96,7 @@ class CategoryService extends BaseService
 
         event(new AttributableSavedEvent($category));
         event(new IndexableSavedEvent($category));
+        event(new CategoryStoredEvent($category));
 
         return $category;
     }
@@ -108,6 +121,7 @@ class CategoryService extends BaseService
 
         event(new AttributableSavedEvent($model));
         event(new IndexableSavedEvent($model));
+        event(new CategoryStoredEvent($model));
 
         return $model;
     }
@@ -129,16 +143,18 @@ class CategoryService extends BaseService
         $category->products()->sync($ids);
 
         if ($existingProducts->count()) {
-            app(SearchContract::class)->indexer()->updateDocuments(
+            app(SearchContract::class)->indexer()->indexObjects(
                 $existingProducts,
                 'categories'
             );
         }
 
-        app(SearchContract::class)->indexer()->updateDocuments(
+        app(SearchContract::class)->indexer()->indexObjects(
             $category->products()->get(),
             'categories'
         );
+
+        event(new CategoryStoredEvent($category));
 
         return $category;
     }
@@ -156,6 +172,8 @@ class CategoryService extends BaseService
         $category = $this->getByHashedId($categoryId);
         $category->layout()->associate($layout);
         $category->save();
+
+        event(new CategoryStoredEvent($category));
 
         return $category;
     }
@@ -179,6 +197,8 @@ class CategoryService extends BaseService
                 $response = $node->prependNode($movedNode);
                 break;
         }
+
+        event(new CategoryStoredEvent($node));
 
         return $response;
     }
@@ -238,6 +258,8 @@ class CategoryService extends BaseService
         $category->products()->sync([]);
         $category->customerGroups()->sync([]);
         $category->channels()->sync([]);
+
+        event(new CategoryStoredEvent($category));
 
         return $category->delete();
     }

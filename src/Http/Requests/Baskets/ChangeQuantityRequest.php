@@ -1,10 +1,10 @@
 <?php
 
-namespace GetCandy\Api\Http\Requests\Shipping\Pricing;
+namespace GetCandy\Api\Http\Requests\Baskets;
 
 use GetCandy\Api\Http\Requests\FormRequest;
 
-class CreateRequest extends FormRequest
+class ChangeQuantityRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -13,7 +13,8 @@ class CreateRequest extends FormRequest
      */
     public function authorize()
     {
-        return $this->user()->hasRole('admin');
+        // return $this->user()->can('create', Category::class);
+        return true;
     }
 
     /**
@@ -24,8 +25,7 @@ class CreateRequest extends FormRequest
     public function rules()
     {
         return [
-            'rate' => 'required|numeric',
-            'currency_id' => 'required|hashid_is_valid:currencies',
+            'quantity' => 'sometimes|numeric|min:1|max:10000',
         ];
     }
 }

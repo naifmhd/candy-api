@@ -65,7 +65,7 @@ class Product extends BaseModel
      * @var array
      */
     protected $fillable = [
-        'id', 'name', 'price', 'attribute_data', 'option_data',
+        'id', 'name', 'price', 'attribute_data', 'option_data', 'deleted_at',
     ];
 
     /**
@@ -179,7 +179,7 @@ class Product extends BaseModel
 
     public function associations()
     {
-        return $this->hasMany(ProductAssociation::class);
+        return $this->hasMany(ProductAssociation::class)->whereHas('association');
     }
 
     public function discounts()

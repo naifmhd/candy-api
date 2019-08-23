@@ -17,6 +17,8 @@ Route::group([
     // Address Route
     $router->delete('addresses/{id}', 'Addresses\AddressController@destroy');
     $router->put('addresses/{id}', 'Addresses\AddressController@update');
+    $router->post('addresses/{id}/default', 'Addresses\AddressController@makeDefault');
+    $router->post('addresses/{id}/default/remove', 'Addresses\AddressController@removeDefault');
     /*
         |--------------------------------------------------------------------------
         | API Client Routes
@@ -47,6 +49,15 @@ Route::group([
     $router->resource('baskets', 'Baskets\BasketController', [
         'except' => ['edit', 'create', 'destroy', 'update'],
     ]);
+
+    /*
+     * Basket Lines
+     */
+    $router->post('basket-lines', 'Baskets\BasketLineController@store');
+    $router->put('basket-lines/{id}', 'Baskets\BasketLineController@update');
+    $router->post('basket-lines/{id}/add', 'Baskets\BasketLineController@addQuantity');
+    $router->post('basket-lines/{id}/remove', 'Baskets\BasketLineController@removeQuantity');
+    $router->delete('basket-lines', 'Baskets\BasketLineController@destroy');
 
     /*
      * Categories
@@ -112,6 +123,7 @@ Route::group([
 
     $router->get('search', 'Search\SearchController@search');
     $router->get('search/suggest', 'Search\SearchController@suggest');
+    $router->get('search/sku', 'Search\SearchController@sku');
     $router->get('search/products', 'Search\SearchController@products');
 
     /*
